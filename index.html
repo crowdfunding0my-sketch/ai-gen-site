@@ -42,22 +42,22 @@
 
         <div id="result-section" class="mt-10 hidden">
             <div class="bg-white p-4 rounded-2xl shadow-md">
-                <div id="image-display" class="relative group">
+                <div id="image-display" class="relative group min-h-[400px] flex items-center justify-center bg-gray-50 rounded-xl overflow-hidden">
                     <!-- 生成された画像がここに挿入されます -->
                 </div>
-                <div class="mt-4 p-4 bg-gray-50 rounded-lg">
+                <div class="mt-4 p-4 bg-gray-50 rounded-lg border-l-4 border-rose-300">
                     <p class="text-xs font-bold text-gray-400 uppercase mb-1">AIが作成した詳細プロンプト</p>
-                    <p id="optimized-prompt" class="text-sm text-gray-600 italic"></p>
+                    <p id="optimized-prompt" class="text-sm text-gray-600 italic leading-relaxed"></p>
                 </div>
             </div>
         </div>
 
-        <div id="error-box" class="mt-6 p-4 bg-red-100 text-red-700 rounded-xl hidden text-center"></div>
+        <div id="error-box" class="mt-6 p-4 bg-red-100 text-red-700 rounded-xl hidden text-center shadow-sm"></div>
     </div>
 
     <script>
-        const apiKey = "AIzaSyBBRwIWuSR1lOYrYEVEa2z9qDKKvuwbEss"; // 環境により自動適用
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'image-gen-app';
+        // APIキーの設定
+        const apiKey = "AIzaSyBBRwIWuSR1lOYrYEVEa2z9qDKKvuwbEss"; 
 
         const generateBtn = document.getElementById('generate-btn');
         const btnLoader = document.getElementById('btn-loader');
@@ -73,21 +73,27 @@
                 try {
                     const response = await fetch(url, options);
                     if (response.ok) return await response.json();
+                    
+                    const errorJson = await response.json().catch(() => ({}));
+                    console.error(`Attempt ${i+1} failed:`, errorJson);
                 } catch (err) {
                     if (i === maxRetries - 1) throw err;
                 }
                 await new Promise(res => setTimeout(res, Math.pow(2, i) * 1000));
             }
+            throw new Error("API request failed after retries.");
         }
 
-        // 日本語から詳細な英語プロンプトを生成する (Gemini 2.5 Flash)
+        // 日本語から詳細な英語プロンプトを生成する (Gemini 1.5 Flash)
         async function optimizePrompt(userText) {
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
-            const systemInstruction = "あなたは画像生成プロンプトの専門家です。ユーザーの日本語入力を元に、Imagen 3.0で高品質・フォトリアルな画像を生成するための詳細な英語プロンプトを作成してください。被写体の特徴、ライティング、カメラの角度、雰囲気を含め、完成したプロンプトのみを出力してください。";
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
             
             const payload = {
-                contents: [{ parts: [{ text: `Create a detailed image generation prompt for: ${userText}` }] }],
-                systemInstruction: { parts: [{ text: systemInstruction }] }
+                contents: [{ 
+                    parts: [{ 
+                        text: `Act as a professional prompt engineer. Convert this Japanese request into a highly detailed, photorealistic English prompt for an image generator (Imagen 3.0). Focus on composition, lighting, and aesthetic quality. Input: ${userText}` 
+                    }] 
+                }]
             };
 
             const data = await fetchWithRetry(url, {
@@ -102,9 +108,15 @@
         // 画像を生成する (Imagen 3.0)
         async function generateImage(englishPrompt) {
             const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-001:predict?key=${apiKey}`;
+            
+            // 重要: instancesは必ず配列 [] にする必要があります
             const payload = {
-                instances: { prompt: englishPrompt },
-                parameters: { sampleCount: 1 }
+                instances: [
+                    { prompt: englishPrompt }
+                ],
+                parameters: { 
+                    sampleCount: 1 
+                }
             };
 
             const data = await fetchWithRetry(url, {
@@ -113,32 +125,37 @@
                 body: JSON.stringify(payload)
             });
 
-            return `data:image/png;base64,${data.predictions[0].bytesBase64Encoded}`;
+            if (data.predictions && data.predictions[0] && data.predictions[0].bytesBase64Encoded) {
+                return `data:image/png;base64,${data.predictions[0].bytesBase64Encoded}`;
+            } else {
+                throw new Error("Image data missing in API response.");
+            }
         }
 
         generateBtn.addEventListener('click', async () => {
             const userInput = userPromptInput.value.trim();
             if (!userInput) return;
 
-            // UI状態の更新
+            // UI状態のリセット
             generateBtn.disabled = true;
             btnLoader.classList.remove('hidden');
             errorBox.classList.add('hidden');
             resultSection.classList.add('hidden');
 
             try {
-                // 1. プロンプトの最適化
+                // 1. プロンプトの最適化 (Gemini)
                 const englishPrompt = await optimizePrompt(userInput);
                 optimizedPromptText.innerText = englishPrompt;
 
-                // 2. 画像の生成
+                // 2. 画像の生成 (Imagen)
                 const imageUrl = await generateImage(englishPrompt);
 
                 // 3. 結果の表示
-                imageDisplay.innerHTML = `<img src="${imageUrl}" class="w-full rounded-xl shadow-inner">`;
+                imageDisplay.innerHTML = `<img src="${imageUrl}" class="w-full h-auto rounded-xl shadow-lg transition-opacity duration-500 opacity-0" onload="this.style.opacity='1'">`;
                 resultSection.classList.remove('hidden');
             } catch (err) {
-                errorBox.innerText = "エラーが発生しました。しばらく待ってから再度お試しください。";
+                console.error("Critical Error:", err);
+                errorBox.innerText = "エラーが発生しました。設定（APIキー、モデル名）やネットワーク環境を確認してください。";
                 errorBox.classList.remove('hidden');
             } finally {
                 generateBtn.disabled = false;
