@@ -83,7 +83,7 @@
         // 日本語から詳細な英語プロンプトを生成する (Gemini 2.5 Flash)
         async function optimizePrompt(userText) {
             const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
-            const systemInstruction = "あなたは画像生成プロンプトの専門家です。ユーザーの日本語入力を元に、Imagen 4.0で高品質・フォトリアルな画像を生成するための詳細な英語プロンプトを作成してください。被写体の特徴、ライティング、カメラの角度、雰囲気を含め、完成したプロンプトのみを出力してください。";
+            const systemInstruction = "あなたは画像生成プロンプトの専門家です。ユーザーの日本語入力を元に、Imagen 3.0で高品質・フォトリアルな画像を生成するための詳細な英語プロンプトを作成してください。被写体の特徴、ライティング、カメラの角度、雰囲気を含め、完成したプロンプトのみを出力してください。";
             
             const payload = {
                 contents: [{ parts: [{ text: `Create a detailed image generation prompt for: ${userText}` }] }],
@@ -99,9 +99,9 @@
             return data.candidates[0].content.parts[0].text.trim();
         }
 
-        // 画像を生成する (Imagen 4.0)
+        // 画像を生成する (Imagen 3.0)
         async function generateImage(englishPrompt) {
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=${apiKey}`;
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-001:predict?key=${apiKey}`;
             const payload = {
                 instances: { prompt: englishPrompt },
                 parameters: { sampleCount: 1 }
