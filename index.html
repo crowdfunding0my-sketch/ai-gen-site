@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Image Creation Studio</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .loading-spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #f472b6;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .glass-card { background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(10px); }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-rose-50 to-teal-50 min-h-screen font-sans text-gray-800">
+
+    <div class="max-w-4xl mx-auto py-12 px-4">
+        <header class="text-center mb-10">
+            <h1 class="text-4xl font-extrabold text-gray-900 mb-2">AI画像生成スタジオ</h1>
+            <p class="text-gray-600">あなたの言葉から、高品質な画像を生成します</p>
+        </header>
+
+        <div class="glass-card p-6 rounded-2xl shadow-xl border border-white">
+            <div class="mb-6">
+                <label for="user-prompt" class="block text-sm font-semibold text-gray-700 mb-2">作りたい画像のイメージ（日本語でOK）</label>
+                <textarea id="user-prompt" rows="3" 
+                    class="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-rose-400 focus:border-transparent outline-none transition"
+                    placeholder="例：かわいい日本人女性がオイルリンパマッサージを受けてリラックスしている、アロマキャンドルの灯り、スパの雰囲気"></textarea>
+            </div>
+
+            <button id="generate-btn" class="w-full bg-rose-500 hover:bg-rose-600 text-white font-bold py-4 rounded-xl shadow-lg transform transition active:scale-95 flex items-center justify-center gap-2">
+                <span>画像を生成する</span>
+                <div id="btn-loader" class="loading-spinner hidden"></div>
+            </button>
+        </div>
+
+        <div id="result-section" class="mt-10 hidden">
+            <div class="bg-white p-4 rounded-2xl shadow-md">
+                <div id="image-display" class="relative group">
+                    <!-- 生成された画像がここに挿入されます -->
+                </div>
+                <div class="mt-4 p-4 bg-gray-50 rounded-lg">
+                    <p class="text-xs font-bold text-gray-400 uppercase mb-1">AIが作成した詳細プロンプト</p>
+                    <p id="optimized-prompt" class="text-sm text-gray-600 italic"></p>
+                </div>
+            </div>
+        </div>
+
+        <div id="error-box" class="mt-6 p-4 bg-red-100 text-red-700 rounded-xl hidden text-center"></div>
+    </div>
+
+    <script>
+        const apiKey = ""; // 環境により自動適用
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'image-gen-app';
+
+        const generateBtn = document.getElementById('generate-btn');
+        const btnLoader = document.getElementById('btn-loader');
+        const userPromptInput = document.getElementById('user-prompt');
+        const resultSection = document.getElementById('result-section');
+        const imageDisplay = document.getElementById('image-display');
+        const optimizedPromptText = document.getElementById('optimized-prompt');
+        const errorBox = document.getElementById('error-box');
+
+        // 指数バックオフ付きのフェッチ関数
+        async function fetchWithRetry(url, options, maxRetries = 5) {
+            for (let i = 0; i < maxRetries; i++) {
+                try {
+                    const response = await fetch(url, options);
+                    if (response.ok) return await response.json();
+                } catch (err) {
+                    if (i === maxRetries - 1) throw err;
+                }
+                await new Promise(res => setTimeout(res, Math.pow(2, i) * 1000));
+            }
+        }
+
+        // 日本語から詳細な英語プロンプトを生成する (Gemini 2.5 Flash)
+        async function optimizePrompt(userText) {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+            const systemInstruction = "あなたは画像生成プロンプトの専門家です。ユーザーの日本語入力を元に、Imagen 4.0で高品質・フォトリアルな画像を生成するための詳細な英語プロンプトを作成してください。被写体の特徴、ライティング、カメラの角度、雰囲気を含め、完成したプロンプトのみを出力してください。";
+            
+            const payload = {
+                contents: [{ parts: [{ text: `Create a detailed image generation prompt for: ${userText}` }] }],
+                systemInstruction: { parts: [{ text: systemInstruction }] }
+            };
+
+            const data = await fetchWithRetry(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            return data.candidates[0].content.parts[0].text.trim();
+        }
+
+        // 画像を生成する (Imagen 4.0)
+        async function generateImage(englishPrompt) {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=${apiKey}`;
+            const payload = {
+                instances: { prompt: englishPrompt },
+                parameters: { sampleCount: 1 }
+            };
+
+            const data = await fetchWithRetry(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            return `data:image/png;base64,${data.predictions[0].bytesBase64Encoded}`;
+        }
+
+        generateBtn.addEventListener('click', async () => {
+            const userInput = userPromptInput.value.trim();
+            if (!userInput) return;
+
+            // UI状態の更新
+            generateBtn.disabled = true;
+            btnLoader.classList.remove('hidden');
+            errorBox.classList.add('hidden');
+            resultSection.classList.add('hidden');
+
+            try {
+                // 1. プロンプトの最適化
+                const englishPrompt = await optimizePrompt(userInput);
+                optimizedPromptText.innerText = englishPrompt;
+
+                // 2. 画像の生成
+                const imageUrl = await generateImage(englishPrompt);
+
+                // 3. 結果の表示
+                imageDisplay.innerHTML = `<img src="${imageUrl}" class="w-full rounded-xl shadow-inner">`;
+                resultSection.classList.remove('hidden');
+            } catch (err) {
+                errorBox.innerText = "エラーが発生しました。しばらく待ってから再度お試しください。";
+                errorBox.classList.remove('hidden');
+            } finally {
+                generateBtn.disabled = false;
+                btnLoader.classList.add('hidden');
+            }
+        });
+    </script>
+</body>
+</html>
